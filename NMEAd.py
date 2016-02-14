@@ -246,7 +246,7 @@ class Writer(ThreadClass):
                     logging.debug('Written struct to file.')
         time.sleep(WRITER_SLEEP_TIME)
 
-def handle_SIGTERM(signum, sigframe):
+def handle_sigterm(signum, sigframe):
     """SIGTERM handler function"""
     logging.info('Received SIGTERM, exiting gracefully.')
     main_exit()
@@ -332,7 +332,7 @@ def main():
     
 if __name__ == '__main__':
     setproctitle.setproctitle('NMEAd')
-    signal.signal(signal.SIGTERM, handle_SIGTERM)
+    signal.signal(signal.SIGTERM, handle_sigterm)
     main()
     while True:
         time.sleep(0.5)
