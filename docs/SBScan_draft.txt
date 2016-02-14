@@ -1,0 +1,45 @@
+0. Parse args
+1. Start logger - CRITICAL: Failed to start logger;
+2. Log starting app
+3. Read config file - CRITICAL: Failed to open; CRITICAL: Required param missing
+4. Connect to DB - CRITICAL: Failed to open the specified db; INFO: Loaded db
+5. Init cleanup stack; Load SIGTERM handler
+6. Start a session
+	6.1. INSERT INTO sessions query; CRITICAL failed to insert session record;
+	6.2. Log INFO started sesion
+	6.3. Read session id global/class as sid
+	6.4. Add close_session to cleanup stack
+7. Open json file handle
+
+8. Init bool var sleeping to True, bool var stopped to False
+9. Wait for a shared lock on json file
+10. Read json, handle empty exception
+12. If sleeping and json['speed'] >= MINSPEED Then
+	Log INFO: Started recording; Set sleeping to False
+13. If not sleeping and json['speed'] < MINSPEED Then
+	Log INFO: Recording paused; Set sleeping to True
+14. If not sleeping abs(json['depthm'][1]-json['gptime'][1])<MAXDIFF seconds Then
+	Call add_position passing json
+15. Sleep for a while
+16. If not stopped GOTO 9
+
+17. Log INFO: Recording halted.
+18. Cleanup stack cleanup
+
+add_position:
+1. Calculate sounder-gps delta as in 10 as s_g_delta.
+2. Concat json field NS[0] with latitude[0] as lat
+3. Concat json field EW[0] with longitude[0] as lon
+4. Load json field latitude[1] alias pass_time
+5. Load json field speed[0] as spd
+6. Load json field track[0] as trk
+7. Exec query 
+	('INSERT INTO positions(passing_time, lat, lon, speed, heading, time_between, session_id)
+		VALUES (?,?,?,?,?,?,?)', (pass_time, lat, lon, spd, trk, s_g_delta, sid)) - CRITICAL
+8. return
+
+close_session:
+1. UPDATE sessions SET endtime=? WHERE sid=?; assert this works
+
+SIGTERM handler:
+1. Set global/class stopped to true
