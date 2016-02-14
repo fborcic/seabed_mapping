@@ -272,9 +272,9 @@ def main():
     """Entry point"""
     apr = argparse.ArgumentParser()
     apr.add_argument('--logfile', 
-                     help='Log file location (defaults to /var/log/nmead.log)')
+                     help=('Log file location (defaults to %s)' % LOGFILE_LOCATION))
     apr.add_argument('--config',
-                     help='Config file location (defaults to /etc/nmead.conf)')
+                     help=('Config file location (defaults to %s)' % CONFIG_LOCATION))
     app = apr.parse_args()
     logfile = app.logfile or LOGFILE_LOCATION
     configf = app.config or CONFIG_LOCATION
