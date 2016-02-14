@@ -19,6 +19,7 @@ import ConfigParser
 import sys
 import logging
 import traceback
+import signal
 
 import serial
 import setproctitle
