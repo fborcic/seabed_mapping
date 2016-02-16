@@ -8,6 +8,7 @@ import signal
 import sys
 import traceback
 import time
+import datetime
 
 import setproctitle
 
@@ -19,27 +20,108 @@ LOCK_SLEEP_TIME = 0.02
 
 stopped = False
 
+NMEA_REQDATA = ['latitude', 'longitude', 'NE', 'EW', 'depthM', 'speed']
+
+def safe_depth(nmea_data):
+    return (float(nmea_data['depthM'][0] or 0) or
+            float(nmea_data['depthf'][0] or 0)*0.3048 or
+            float(nmea_data['depthF'][0] or 0)*1.8288)
+
 class CfgErr(Exception):
     """Config file related error"""
     pass
 
 class Session(object):
     def __init__(self, params):
-        pass
+        self.params = params
+        self.sid = None
+        self.paused = False
+        self.have_req_nmea = False
+        self.position_counter = 0
+        self.last_timest = None
+        self.check_minspeed = self.params['pause_on_stop'] == 'True'
+        self.minspeed = float(self.params['minspeed'])
+        self.commit_interval = int(self.params['commit_interval'])
+        self.log_interval = int(self.params['log_point_count_interval'])
+        self.log_count = self.params['log_point_count'] == 'True'
         
-    def __enter__():
-        pass
-    
-    def __exit__():
-        pass
-    
-    def _get_sid():
-        pass
-    
-    def check_add_position(nmea_data):
-        pass
-    
-    def pause():
+        try:
+            self.db = sqlite.connect(self.params['db_file'])
+        except:
+            logging.critical('Failed to open db file %s !', 
+                             self.params['db_file'])
+            
+        self.cursor = self.db.cursor()
+        
+    def __enter__(self):
+        start_time = time.time()
+        start_tstamp = datetime.datetime.fromtimestamp(start_time)
+        
+        self.safe_execute(('INSERT INTO sessions(starttime, stoptime) '
+                           'VALUES (?, NULL)'), start_tstamp)
+            
+        self.sid = self.cursor.lastrowid
+        assert self.sid
+        
+        self.db.commit()
+        return self
+        
+    def __exit__(self):
+        stop_time = time.time()
+        stop_tstamp = datetime.datetime.fromtimestamp(stop_time)
+        
+        self.safe_execute(('UPDATE sessions SET stoptime = ? '
+                           'WHERE _id = ?'), (stop_tstamp, self.sid))
+        
+        self._close()
+        
+    def check_add_position(self, nmea_data):
+        if self.check_minspeed:
+            self.paused = float(nmea_data['speed'][0]) < self.minspeed
+        if not self.have_req_nmea:
+            for key in NMEA_REQDATA:
+                if key not in nmea_data:
+                    return
+            logging.info('Received required NMEA data.')
+            self.have_req_nmea = True
+        
+        pass_time = nmea_data['latitude'][1]
+        if not paused and pass_time > self.last_timest:
+            s_g_delta = nmea_data['latitude'][1] - nmea_data['depthM'][1]
+            lat = nmea_data['latitude'][0] + nmea_data['NS'][0]
+            lon = nmea_data['longitude'][0] + nmea_data['EW'][0]
+            spd = float(nmea_data['speed'][0])
+            trk = float(nmea_data['track'][0])
+            dpt = safe_depth(nmea_data)
+            
+            self.safe_execute(('INSERT INTO positions(passing_time, lat, '
+                                 'lon, speed, heading, time_between, '
+                                 ' session_id) VALUES (?,?,?,?,?,?,?)'),
+                                 (pass_time, lat, lon, spd,
+                                 trk, s_g_delta, self.sid))
+            self.position_counter += 1
+            
+            if not self.position_counter % self.commit_interval:
+                self.db.commit()
+            
+            if self.log_count and not (self.position_counter %
+                                       self.log_interval):
+                logging.info('Recorded %d points', self.position_counter)
+            
+    def safe_execute(self, querystring, argtuple):
+        try:
+            self.cursor.execute(querystring, argtuple)
+        except sqlite3.OperationalError:
+            logging.critical('SQL operation failed: ', querystring)
+            self._close()
+            sys.exit(1)
+            
+    def _close(self):
+        self.db.commit()
+        self.cursor.close()
+        self.db.close()
+        
+    def log_count(self):
         pass
 
 def handle_sigterm(signum, sigframe):
@@ -55,7 +137,8 @@ def load_config(fname):
                                     'pause_on_stop':'True',
                                     'polling_interval':'0.5',
                                     'log_point_count':'True',
-                                    'log_point_count_interval':'1000'})]
+                                    'log_point_count_interval':'1000',
+                                    'commit_interval':'500'})]
     cfg = ConfigParser.ConfigParser()
     cfg.read([fname])
     if not cfg.sections():
@@ -77,9 +160,11 @@ def load_config(fname):
 def main():
     apr = argparse.ArgumentParser()
     apr.add_argument('--logfile', 
-                     help=('Log file location (defaults to %s)' % LOGFILE_LOCATION))
+                     help=('Log file location (defaults to %s)' % 
+                     LOGFILE_LOCATION))
     apr.add_argument('--config',
-                     help=('Config file location (defaults to %s)' % CONFIG_LOCATION))
+                     help=('Config file location (defaults to %s)' %
+                     CONFIG_LOCATION))
     app = apr.parse_args()
     logfile = app.logfile or LOGFILE_LOCATION
     configf = app.config or CONFIG_LOCATION
