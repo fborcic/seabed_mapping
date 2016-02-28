@@ -20,10 +20,10 @@ LOCK_SLEEP_TIME = 0.02
 
 stopped = False
 
-NMEA_REQDATA = ['latitude', 'longitude', 'NE', 'EW', 'depthM', 'speed']
+NMEA_REQDATA = ['latitude', 'longitude', 'NS', 'EW', 'depthm', 'speed']
 
 def safe_depth(nmea_data):
-    return (float(nmea_data['depthM'][0] or 0) or
+    return (float(nmea_data['depthm'][0] or 0) or
             float(nmea_data['depthf'][0] or 0)*0.3048 or
             float(nmea_data['depthF'][0] or 0)*1.8288)
 
@@ -38,18 +38,18 @@ class Session(object):
         self.paused = False
         self.have_req_nmea = False
         self.position_counter = 0
-        self.last_timest = None
-        self.check_minspeed = self.params['pause_on_stop'] == 'True'
+        self.last_timest = float('-inf')
+        self.check_minspeed = (self.params['pause_on_stop'] == 'True')
         self.minspeed = float(self.params['minspeed'])
         self.commit_interval = int(self.params['commit_interval'])
         self.log_interval = int(self.params['log_point_count_interval'])
-        self.log_count = self.params['log_point_count'] == 'True'
-        
+        self.log_count = (self.params['log_point_count'] == 'True')
         try:
-            self.db = sqlite.connect(self.params['db_file'])
+            self.db = sqlite3.connect(self.params['db_file'])
         except:
             logging.critical('Failed to open db file %s !', 
                              self.params['db_file'])
+            sys.exit()
             
         self.cursor = self.db.cursor()
         
@@ -58,7 +58,7 @@ class Session(object):
         start_tstamp = datetime.datetime.fromtimestamp(start_time)
         
         self.safe_execute(('INSERT INTO sessions(starttime, stoptime) '
-                           'VALUES (?, NULL)'), start_tstamp)
+                           'VALUES (?, NULL)'), (start_tstamp,))
             
         self.sid = self.cursor.lastrowid
         assert self.sid
@@ -66,7 +66,7 @@ class Session(object):
         self.db.commit()
         return self
         
-    def __exit__(self):
+    def __exit__(self, dummy, dummy2, dummy3):
         stop_time = time.time()
         stop_tstamp = datetime.datetime.fromtimestamp(stop_time)
         
@@ -81,13 +81,15 @@ class Session(object):
         if not self.have_req_nmea:
             for key in NMEA_REQDATA:
                 if key not in nmea_data:
+                    print key
                     return
             logging.info('Received required NMEA data.')
             self.have_req_nmea = True
-        
         pass_time = nmea_data['latitude'][1]
-        if not paused and pass_time > self.last_timest:
-            s_g_delta = nmea_data['latitude'][1] - nmea_data['depthM'][1]
+        print self.paused, pass_time > self.last_timest
+        if not self.paused and pass_time > self.last_timest:
+            print 'CAP - passed condition'
+            s_g_delta = nmea_data['latitude'][1] - nmea_data['depthm'][1]
             lat = nmea_data['latitude'][0] + nmea_data['NS'][0]
             lon = nmea_data['longitude'][0] + nmea_data['EW'][0]
             spd = float(nmea_data['speed'][0])
@@ -154,7 +156,8 @@ def load_config(fname):
         if not cfg.has_section(section[0]):
             cfg.add_section(section[0])
         for option, value in section[1].iteritems():
-            cfg.set(section[0], option, value)
+            if not cfg.has_option(section[0], option):
+                cfg.set(section[0], option, value)
     return cfg
 
 def main():
@@ -185,7 +188,7 @@ def main():
     else:
         logging.info('Loaded config file.')
     
-    params = config.items('scanner')
+    params = dict(config.items('scanner'))
     
     with Session(params) as session:
         try:
@@ -195,11 +198,15 @@ def main():
                     with file_lock(f) as lock:
                         if not lock:
                             time.sleep(LOCK_SLEEP_TIME)
+                            print 'Ctn1!'
                             continue
                         try:
+                            f.seek(0)
                             json_file = json.load(f)
                         except ValueError:
+                            print 'Ctn2!'
                             continue
+                    print 'Check!'
                     session.check_add_position(json_file)
                     time.sleep(float(params['polling_interval']))
                     
