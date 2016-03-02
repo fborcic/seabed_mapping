@@ -3,8 +3,8 @@
 """
 NMEA driver for a sounder and a GPS. Output is written to specified file
 in json format. Uses nmea_templates.py to specify sentence format and
-a mandatory config file with three mandatory sections documented in
-load_config docstring. Should be run with permissions to read and write to
+a mandatory config file with three mandatory sections documented in the
+documentation files. Should be run with permissions to read and write to
 the serial ports specified, and write to the log file specified. Automated
 install script should take care of that, preferably by adding a new user.
 

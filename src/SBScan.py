@@ -1,4 +1,14 @@
 #!/usr/bin/env python
+
+"""
+NMEA position and depth logger for depth mapping. Logs to an sqlite3
+database. Links to NMEAd over a json file respecting unix advisory
+file locks. Uses a mandatory config file with a single section that
+whose format is documented in the documentation file.
+
+Should be run manually using start-stop-daemon AFTER NMEAd.
+"""
+
 import sqlite3
 import json
 import logging
@@ -9,6 +19,7 @@ import sys
 import traceback
 import time
 import datetime
+import errno
 
 import setproctitle
 
@@ -23,6 +34,11 @@ stopped = False
 NMEA_REQDATA = ['latitude', 'longitude', 'NS', 'EW', 'depthm', 'speed']
 
 def safe_depth(nmea_data):
+    """
+    safe_depth(nmea_data: dict) -> float
+    
+    Get depth data in meters even if the sounder doesn't report it.
+    """
     return (float(nmea_data['depthm'][0] or 0) or
             float(nmea_data['depthf'][0] or 0)*0.3048 or
             float(nmea_data['depthF'][0] or 0)*1.8288)
@@ -32,6 +48,7 @@ class CfgErr(Exception):
     pass
 
 class Session(object):
+    """DB logging session context manager"""
     def __init__(self, params):
         self.params = params
         self.sid = None
@@ -54,6 +71,8 @@ class Session(object):
         self.cursor = self.db.cursor()
         
     def __enter__(self):
+        """Log session start time."""
+        
         start_time = time.time()
         start_tstamp = datetime.datetime.fromtimestamp(start_time)
         
@@ -63,10 +82,14 @@ class Session(object):
         self.sid = self.cursor.lastrowid
         assert self.sid
         
+        logging.info('Opened session: %d', self.sid)
+        
         self.db.commit()
         return self
         
     def __exit__(self, dummy, dummy2, dummy3):
+        """Log session end time, commit changes and close the db."""
+           
         stop_time = time.time()
         stop_tstamp = datetime.datetime.fromtimestamp(stop_time)
         
@@ -76,19 +99,19 @@ class Session(object):
         self._close()
         
     def check_add_position(self, nmea_data):
+        """If conditions are met, log a position into the db"""
+
         if self.check_minspeed:
             self.paused = float(nmea_data['speed'][0]) < self.minspeed
         if not self.have_req_nmea:
             for key in NMEA_REQDATA:
                 if key not in nmea_data:
-                    print key
                     return
             logging.info('Received required NMEA data.')
             self.have_req_nmea = True
         pass_time = nmea_data['latitude'][1]
         print self.paused, pass_time > self.last_timest
         if not self.paused and pass_time > self.last_timest:
-            print 'CAP - passed condition'
             s_g_delta = nmea_data['latitude'][1] - nmea_data['depthm'][1]
             lat = nmea_data['latitude'][0] + nmea_data['NS'][0]
             lon = nmea_data['longitude'][0] + nmea_data['EW'][0]
@@ -98,9 +121,10 @@ class Session(object):
             
             self.safe_execute(('INSERT INTO positions(passing_time, lat, '
                                  'lon, speed, heading, time_between, '
-                                 ' session_id) VALUES (?,?,?,?,?,?,?)'),
+                                 'depth, session_id) ' 
+                                 'VALUES (?,?,?,?,?,?,?,?)'),
                                  (pass_time, lat, lon, spd,
-                                 trk, s_g_delta, self.sid))
+                                 trk, s_g_delta, dpt, self.sid))
             self.position_counter += 1
             
             if not self.position_counter % self.commit_interval:
@@ -111,22 +135,23 @@ class Session(object):
                 logging.info('Recorded %d points', self.position_counter)
             
     def safe_execute(self, querystring, argtuple):
+        """Safely execute a query, logging a failure"""
+        
         try:
             self.cursor.execute(querystring, argtuple)
         except sqlite3.OperationalError:
-            logging.critical('SQL operation failed: ', querystring)
+            logging.critical('SQL operation failed: %s', querystring)
             self._close()
             sys.exit(1)
             
     def _close(self):
+        """Close and commit"""
         self.db.commit()
         self.cursor.close()
         self.db.close()
-        
-    def log_count(self):
-        pass
 
 def handle_sigterm(signum, sigframe):
+    """SIGTERM handler function"""
     global stopped
     logging.info('Caught SIGTERM, exiting.')
     stopped = True
@@ -161,6 +186,7 @@ def load_config(fname):
     return cfg
 
 def main():
+    """Program entry point"""
     apr = argparse.ArgumentParser()
     apr.add_argument('--logfile', 
                      help=('Log file location (defaults to %s)' % 
@@ -198,13 +224,11 @@ def main():
                     with file_lock(f) as lock:
                         if not lock:
                             time.sleep(LOCK_SLEEP_TIME)
-                            print 'Ctn1!'
                             continue
                         try:
                             f.seek(0)
                             json_file = json.load(f)
                         except ValueError:
-                            print 'Ctn2!'
                             continue
                     print 'Check!'
                     session.check_add_position(json_file)
