@@ -1,6 +1,8 @@
 NMEAd and SBScan documentation
 ==============================
 
+**TODO: Document the interface format**
+
 NMEAd
 -----
 
@@ -39,6 +41,31 @@ baud:*BAUD_RATE* *(default: 4800)*
 disable_nmea:*INFO_LIST* *(default: None)*
 check_checksums:*True|False* *(default: False)*
 
-If any of the required parameters are missing, NMEAd will fail to run. The
-INFO_LIST parameter is a comma separated list of NMEA data that you explicitely
-want to exclude from the resulting json file.
+If any of the required parameters are missing, NMEAd will fail to run. 
+Parameter description
+
+*output_file* - absolute path to json file
+*port* - absolute path to the serial port device file
+*disable_nmea* - comma separated list of nmea parameters explicitely
+                 excluded from the json files
+*check_checksum* - if 'True', NMEAd checks nmea sentence checksums 
+
+
+SBScan
+------
+
+Most of the above applies to SBScan as well. It is a logging daemon that
+connects to NMEAd by a common json file, respecting the POSIX advisory
+file locks. The command line syntax is the same, and the default values
+for config files and log files are *'/etc/sbscan.conf'* and 
+*'/var/log/sbscan.log'*.
+
+It can use the same config file NMEAd uses, requiring a section named
+scanner, formatted as follows:
+
+[scanner]
+db_file:*PATH_TO_DB_FILE* *(required)*
+minspeed:*MIN_SPEED* *(defaults to 0.5)*
+maxdelta:*MAX_DELTA* *(defaults to 1.0)*
+pause_on_stop:*True|False* *(defaults to True)*
+
